@@ -27,13 +27,15 @@ CC = $(CROSS_COMPILE)gcc
 OBJCOPY = $(CROSS_COMPILE)objcopy
 
 OPT_FLAGS = -Os
-CFLAGS += -mcpu=cortex-m3 -mthumb \
-	-DSTM32F1 -DDISCOVERY_STLINK -I../libopencm3/include \
+CFLAGS += -mcpu=cortex-m4 -mthumb \
+	-DSTM32L4 -DDISCOVERY_STLINK -I../libopencm3/include \
+	-mfloat-abi=hard -mfpu=fpv4-sp-d16 \
 	-I .
 LDFLAGS_BOOT := $(LDFLAGS) --specs=nano.specs \
-	-lopencm3_stm32f1 -Wl,--defsym,_stack=0x20005000 \
+	-lopencm3_stm32l4 -Wl,--defsym,_stack=0x20005000 \
 	-Wl,-T,bluepill.ld -nostartfiles -lc \
-	-Wl,-Map=mapfile -mthumb -mcpu=cortex-m3 -Wl,-gc-sections \
+	-Wl,-Map=mapfile -mthumb -mcpu=cortex-m4 -Wl,-gc-sections \
+	-mfloat-abi=hard -mfpu=fpv4-sp-d16 \
 	-L../libopencm3/lib
 LDFLAGS = $(LDFLAGS_BOOT)
 

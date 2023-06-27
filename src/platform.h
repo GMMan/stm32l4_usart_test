@@ -26,9 +26,7 @@
 
 #include "version.h"
 
-#include <libopencm3/cm3/common.h>
-#include <libopencm3/stm32/f1/memorymap.h>
-#include <libopencm3/stm32/f1/gpio.h>
+#include <libopencm3/stm32/gpio.h>
 #include <libopencm3/usb/usbd.h>
 
 struct platform_timeout {
@@ -54,7 +52,6 @@ void platform_srst_set_val(bool assert);
 bool platform_srst_get_val(void);
 bool platform_target_get_power(void);
 void platform_target_set_power(bool power);
-void platform_request_boot(void);
 
 
 #ifdef ENABLE_DEBUG
@@ -65,13 +62,12 @@ void platform_request_boot(void);
 #define BOARD_IDENT       "Black Magic Probe (STLINK), (Firmware " FIRMWARE_VERSION ")"
 #define UPD_IFACE_STRING  "@Internal Flash   /0x08000000/8*001Kg"
 
-#define LED_PORT	GPIOA
 /* Use PC13 for a "dummy" uart led. So we can observe the LED. */
-#define LED_PORT_UART	GPIOC
-#define LED_UART	GPIO13
+#define LED_PORT_UART	GPIOB
+#define LED_UART	GPIO14
 
-#define USB_DRIVER      st_usbfs_v1_usb_driver
-#define USB_IRQ	        NVIC_USB_LP_CAN_RX0_IRQ
+#define USB_DRIVER      otgfs_usb_driver
+#define USB_IRQ	        NVIC_OTG_FS_IRQ
 #define USB_ISR	        usb_lp_can_rx0_isr
 /* Interrupt priorities.  Low numbers are high priority.
  * For now USART2 preempts USB which may spin while buffer is drained.
@@ -88,14 +84,6 @@ int usbuart_debug_write(const char *buf, size_t len);
 #else
 # define DEBUG(...)
 #endif
-
-extern uint16_t led_idle_run;
-#define LED_IDLE_RUN            led_idle_run
-#define SET_RUN_STATE(state)	{running_status = (state);}
-#define SET_IDLE_STATE(state)	{gpio_set_val(LED_PORT, led_idle_run, state);}
-#define SET_ERROR_STATE(x)
-
-extern uint32_t detect_rev(void);
 
 /* Use newlib provided integer only stdio functions */
 #define sscanf siscanf

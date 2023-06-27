@@ -19,7 +19,6 @@
  */
 
 #include <libopencm3/stm32/rcc.h>
-#include <libopencm3/stm32/gpio.h>
 #include <libopencm3/stm32/usart.h>
 #include <libopencm3/stm32/timer.h>
 #include <libopencm3/cm3/nvic.h>
@@ -35,38 +34,22 @@
 #define FIFO_SIZE 128
 
 /* RX Fifo buffer */
-static uint8_t buf_rx1[FIFO_SIZE];
 static uint8_t buf_rx2[FIFO_SIZE];
-static uint8_t buf_rx3[FIFO_SIZE];
 /* Fifo in pointer, writes assumed to be atomic, should be only incremented within RX ISR */
-static uint8_t buf_rx1_in;
 static uint8_t buf_rx2_in;
-static uint8_t buf_rx3_in;
 /* Fifo out pointer, writes assumed to be atomic, should be only incremented outside RX ISR */
-static uint8_t buf_rx1_out;
 static uint8_t buf_rx2_out;
-static uint8_t buf_rx3_out;
 
 static void usbuart_run(int USBUSART_TIM, uint8_t *buf_rx_out, uint8_t *buf_rx_in, uint8_t *buf_rx, int CDCACM_UART_ENDPOINT);
 
 void usbuart_init(void)
 {
-	rcc_periph_clock_enable(RCC_USART1);
 	rcc_periph_clock_enable(RCC_USART2);
-	rcc_periph_clock_enable(RCC_USART3);
 
-	gpio_set_mode(GPIOA, GPIO_MODE_OUTPUT_2_MHZ, GPIO_CNF_OUTPUT_ALTFN_PUSHPULL, GPIO9);
-	gpio_set_mode(GPIOA, GPIO_MODE_OUTPUT_2_MHZ, GPIO_CNF_OUTPUT_ALTFN_PUSHPULL, GPIO2);
-	gpio_set_mode(GPIOB, GPIO_MODE_OUTPUT_2_MHZ, GPIO_CNF_OUTPUT_ALTFN_PUSHPULL, GPIO10);
+	gpio_mode_setup(GPIOD, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO5 | GPIO6 | GPIO7);
+	gpio_set_af(GPIOD, GPIO_AF7, GPIO5 | GPIO6 | GPIO7);
 
 	/* Setup UART parameters. */
-	usart_set_baudrate(USART1, 38400);
-	usart_set_databits(USART1, 8);
-	usart_set_stopbits(USART1, USART_STOPBITS_1);
-	usart_set_mode(USART1, USART_MODE_TX_RX);
-	usart_set_parity(USART1, USART_PARITY_NONE);
-	usart_set_flow_control(USART1, USART_FLOWCONTROL_NONE);
-
 	usart_set_baudrate(USART2, 38400);
 	usart_set_databits(USART2, 8);
 	usart_set_stopbits(USART2, USART_STOPBITS_1);
@@ -74,68 +57,31 @@ void usbuart_init(void)
 	usart_set_parity(USART2, USART_PARITY_NONE);
 	usart_set_flow_control(USART2, USART_FLOWCONTROL_NONE);
 
-	usart_set_baudrate(USART3, 38400);
-	usart_set_databits(USART3, 8);
-	usart_set_stopbits(USART3, USART_STOPBITS_1);
-	usart_set_mode(USART3, USART_MODE_TX_RX);
-	usart_set_parity(USART3, USART_PARITY_NONE);
-	usart_set_flow_control(USART3, USART_FLOWCONTROL_NONE);
-
 	/* Finally enable the USARTs. */
-	usart_enable(USART1);
 	usart_enable(USART2);
-	usart_enable(USART3);
 
 	/* Enable interrupts */
-	USART1_CR1 |= USART_CR1_RXNEIE;
-	nvic_set_priority(NVIC_USART1_IRQ, IRQ_PRI_USBUSART);
-	nvic_enable_irq(NVIC_USART1_IRQ);
-
 	USART2_CR1 |= USART_CR1_RXNEIE;
 	nvic_set_priority(NVIC_USART2_IRQ, IRQ_PRI_USBUSART);
 	nvic_enable_irq(NVIC_USART2_IRQ);
 
-	USART3_CR1 |= USART_CR1_RXNEIE;
-	nvic_set_priority(NVIC_USART3_IRQ, IRQ_PRI_USBUSART);
-	nvic_enable_irq(NVIC_USART3_IRQ);
-
 	/* Setup timer for running deferred FIFO processing */
-	rcc_periph_clock_enable(RCC_TIM2);
 	rcc_periph_clock_enable(RCC_TIM3);
-	rcc_periph_clock_enable(RCC_TIM4);
-	timer_reset(TIM2);
-	timer_reset(TIM3);
-	timer_reset(TIM4);
-	timer_set_mode(TIM2, TIM_CR1_CKD_CK_INT, TIM_CR1_CMS_EDGE, TIM_CR1_DIR_UP);
+	rcc_periph_reset_pulse(RST_TIM3);
 	timer_set_mode(TIM3, TIM_CR1_CKD_CK_INT, TIM_CR1_CMS_EDGE, TIM_CR1_DIR_UP);
-	timer_set_mode(TIM4, TIM_CR1_CKD_CK_INT, TIM_CR1_CMS_EDGE, TIM_CR1_DIR_UP);
 
-	timer_set_prescaler(TIM2,
-			rcc_apb2_frequency / USBUART_TIMER_FREQ_HZ * 2 - 1);
 	timer_set_prescaler(TIM3,
 			rcc_apb2_frequency / USBUART_TIMER_FREQ_HZ * 2 - 1);
-	timer_set_prescaler(TIM4,
-			rcc_apb2_frequency / USBUART_TIMER_FREQ_HZ * 2 - 1);
 
-	timer_set_period(TIM2,
-			USBUART_TIMER_FREQ_HZ / USBUART_RUN_FREQ_HZ - 1);
 	timer_set_period(TIM3,
-			USBUART_TIMER_FREQ_HZ / USBUART_RUN_FREQ_HZ - 1);
-	timer_set_period(TIM4,
 			USBUART_TIMER_FREQ_HZ / USBUART_RUN_FREQ_HZ - 1);
 
 	/* Setup update interrupt in NVIC */
-	nvic_set_priority(NVIC_TIM2_IRQ, IRQ_PRI_USBUSART_TIM);
 	nvic_set_priority(NVIC_TIM3_IRQ, IRQ_PRI_USBUSART_TIM);
-	nvic_set_priority(NVIC_TIM4_IRQ, IRQ_PRI_USBUSART_TIM);
-	nvic_enable_irq(NVIC_TIM2_IRQ);
 	nvic_enable_irq(NVIC_TIM3_IRQ);
-	nvic_enable_irq(NVIC_TIM4_IRQ);
 
 	/* turn the timer on */
-	timer_enable_counter(TIM2);
 	timer_enable_counter(TIM3);
-	timer_enable_counter(TIM4);
 }
 
 /*
@@ -231,19 +177,9 @@ static void usbuart_usb_out_cb(int USBUSART, usbd_device *dev, uint8_t ep, int C
 	gpio_clear(LED_PORT_UART, LED_UART);
 }
 
-void usbuart1_usb_out_cb(usbd_device *dev, uint8_t ep)
-{
-    usbuart_usb_out_cb(USART1, dev, ep, 5);
-}
-
 void usbuart2_usb_out_cb(usbd_device *dev, uint8_t ep)
 {
     usbuart_usb_out_cb(USART2, dev, ep, 1);
-}
-
-void usbuart3_usb_out_cb(usbd_device *dev, uint8_t ep)
-{
-    usbuart_usb_out_cb(USART3, dev, ep, 3);
 }
 
 
@@ -278,9 +214,9 @@ void usbuart_usb_in_cb(usbd_device *dev, uint8_t ep)
 // USBUSART_ISR
 static void usart_isr(int USBUSART, int USBUSART_TIM, uint8_t *buf_rx_out, uint8_t *buf_rx_in, uint8_t *buf_rx)
 {
-	uint32_t err = USART_SR(USBUSART);
+	uint32_t err = USART_ISR(USBUSART);
 	char c = usart_recv(USBUSART);
-	if (err & (USART_SR_ORE | USART_SR_FE))
+	if (err & (USART_ISR_ORE | USART_ISR_FE))
 		return;
 
 	/* Turn on LED */
@@ -305,32 +241,13 @@ static void usart_isr(int USBUSART, int USBUSART_TIM, uint8_t *buf_rx_out, uint8
 	}
 }
 
-void usart1_isr(void)
-{
-    usart_isr(USART1, TIM2, &buf_rx1_out, &buf_rx1_in, buf_rx1);
-}
-
 void usart2_isr(void)
 {
     usart_isr(USART2, TIM3, &buf_rx2_out, &buf_rx2_in, buf_rx2);
 }
 
-void usart3_isr(void)
-{
-    usart_isr(USART3, TIM4, &buf_rx3_out, &buf_rx3_in, buf_rx3);
-}
-
 
 // USBUSART_TIM_ISR
-void tim2_isr(void)
-{
-	/* need to clear timer update event */
-	timer_clear_flag(TIM2, TIM_SR_UIF);
-
-	/* process FIFO */
-	usbuart_run(TIM2, &buf_rx1_out, &buf_rx1_in, buf_rx1, 5);
-}
-
 void tim3_isr(void)
 {
 	/* need to clear timer update event */
@@ -338,15 +255,6 @@ void tim3_isr(void)
 
 	/* process FIFO */
 	usbuart_run(TIM3, &buf_rx2_out, &buf_rx2_in, buf_rx2, 1);
-}
-
-void tim4_isr(void)
-{
-	/* need to clear timer update event */
-	timer_clear_flag(TIM4, TIM_SR_UIF);
-
-	/* process FIFO */
-	usbuart_run(TIM4, &buf_rx3_out, &buf_rx3_in, buf_rx3, 3);
 }
 
 #ifdef ENABLE_DEBUG
